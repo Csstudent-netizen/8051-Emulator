@@ -27,15 +27,15 @@ int main() {
     }
 
     // TEST 3: ROM Mapping (EA Pin Logic)
-    chip.rom_internal[0x0000] = 0xAA; // Internal Marker
-    chip.rom_external[0x0000] = 0xBB; // External Marker
+    chip.rom_internal[0x0000] = 0xAA;
+    chip.rom_external[0x0000] = 0xBB;
 
-    // Case A: EA = 1 (Default) -> Should read Internal
-    chip.cfg.EA = 1;
+    //EA = 1 -> Should read Internal
+    chip.EA = 1;
     uint8_t val1 = system_read_code(&chip, 0x0000);
     
-    // Case B: EA = 0 -> Should read External
-    chip.cfg.EA = 0;
+    //EA = 0 -> Should read External
+    chip.EA = 0;
     uint8_t val2 = system_read_code(&chip, 0x0000);
 
     if (val1 == 0xAA && val2 == 0xBB) {

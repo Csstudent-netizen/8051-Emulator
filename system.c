@@ -18,20 +18,19 @@ void system_reset(system_8051_t *sys) {
     sys->sfr.P3 = 0xFF;
     
     // 4. Set Hardware Config
-    sys->cfg.EA = 1;            // Default: Boot from Internal ROM
-    sys->cfg.int_rom_size = 4096; // Standard 4KB Internal ROM
+    sys->EA = 1;            // Default: Boot from Internal ROM
 }
 
 // CODE FETCH (ROM)
 uint8_t system_read_code(system_8051_t *sys, uint16_t address) {
     // IF EA Pin is Low (0): Force External Access for ALL addresses
-    if (sys->cfg.EA == 0) {
+    if (sys->EA == 0) {
         return sys->rom_external[address];
     }
     
     // IF EA Pin is High (1): Use Internal ROM for low addresses
     else {
-        if (address < sys->cfg.int_rom_size) {
+        if (address < INT_ROM_SIZE) {
             return sys->rom_internal[address];
         } else {
             return sys->rom_external[address];
