@@ -20,9 +20,9 @@ typedef struct {
     uint8_t xram[65536]; 
     
     // CODE MEMORY
-    uint8_t rom_internal[INT_ROM_SIZE]; 
+    uint8_t irom[INT_ROM_SIZE]; 
 
-    uint8_t rom_external[65536]; 
+    uint8_t xrom[65536]; 
 
 } system_8051_t;
 
@@ -35,5 +35,7 @@ void system_write_iram(system_8051_t *sys, uint8_t address, uint8_t value);
 
 uint8_t system_read_xram(system_8051_t *sys, uint16_t address);
 void system_write_xram(system_8051_t *sys, uint16_t address, uint8_t value);
+
+void cpu_step(system_8051_t *sys);
 
 #endif

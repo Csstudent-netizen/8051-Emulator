@@ -1,7 +1,7 @@
 CC = clang
 CFLAGS = -Wall -g
 TARGET = emulator
-SRCS = main.c system.c
+SRCS = main.c system.c cpu.c
 
 all:
 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)

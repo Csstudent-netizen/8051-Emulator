@@ -7,11 +7,11 @@ void system_reset(system_8051_t *sys) {
 
     // 2. Set CPU Core Defaults (Power On State)
     sys->cpu.PC = 0x0000;
-    sys->cpu.SP = 0x07;     // Stack Pointer starts at 0x07
+    sys->cpu.SP = 0x07;     
     sys->cpu.cycles = 0;
 
     // 3. Set Peripheral Defaults
-    // Ports start as Input (Logic 1 / High Impedance)
+    // Ports start as Input
     sys->sfr.P0 = 0xFF;
     sys->sfr.P1 = 0xFF;
     sys->sfr.P2 = 0xFF;
@@ -25,15 +25,15 @@ void system_reset(system_8051_t *sys) {
 uint8_t system_read_code(system_8051_t *sys, uint16_t address) {
     // IF EA Pin is Low (0): Force External Access for ALL addresses
     if (sys->EA == 0) {
-        return sys->rom_external[address];
+        return sys->xrom[address];
     }
     
     // IF EA Pin is High (1): Use Internal ROM for low addresses
     else {
         if (address < INT_ROM_SIZE) {
-            return sys->rom_internal[address];
+            return sys->irom[address];
         } else {
-            return sys->rom_external[address];
+            return sys->xrom[address];
         }
     }
 }

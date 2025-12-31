@@ -24,7 +24,4 @@ typedef struct {
 #define PSW_OV   0x04
 #define PSW_P    0x01
 
-// Function to reset ONLY the core registers
-void cpu_reset(cpu_core_t *cpu);
-
 #endif
