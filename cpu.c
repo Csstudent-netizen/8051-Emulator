@@ -17,6 +17,99 @@ static void update_parity(system_8051_t *sys) {
     else sys->cpu.PSW &= ~PSW_P;
 }
 
+//handling direct addressing for SFRs
+uint8_t iram_read(system_8051_t *sys, uint8_t address) {
+    if(address < 0x80) return sys->iram[address];
+    else {
+        switch (address) {
+            case 0xE0: return sys->cpu.A;
+            
+            case 0xF0: return sys->cpu.B;
+
+            case 0x81: return sys->cpu.SP;
+
+            case 0xD0: return sys->cpu.PSW;
+
+            case 0x88: return sys->sfr.TCON;
+            
+            case 0x89: return sys->sfr.TMOD;
+            
+            case 0x8A: return sys->sfr.TL0;
+
+            case 0x8B: return sys->sfr.TL1;
+
+            case 0x8C: return sys->sfr.TH0;
+
+            case 0x8D: return sys->sfr.TH1;
+
+            //more to come
+            
+            default:
+                printf("Unknown SFR address: 0x%02X\n", address);
+                return 0;
+        }
+    }
+}
+
+void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
+    if(address < 0x80) sys->iram[address] = value;
+    else {
+        switch (address) {
+            case 0xE0:
+                sys->cpu.A = value;
+                update_parity(sys);
+                break;
+            
+            case 0xF0: sys->cpu.B = value; break;
+
+            case 0x81: sys->cpu.SP = value; break;
+
+            case 0xD0: sys->cpu.PSW = value; break;
+
+            case 0x88: sys->sfr.TCON = value; break; 
+
+            case 0x89: sys->sfr.TMOD = value; break; 
+
+            case 0x8A: sys->sfr.TL0 = value; break;
+
+            case 0x8B: sys->sfr.TL1 = value; break;
+
+            case 0x8C: sys->sfr.TH0 = value; break;
+
+            case 0x8D: sys->sfr.TH1 = value; break;
+
+            //more to come
+            
+            default:
+                printf("Unknown SFR address: 0x%02X\n", address);
+                break;
+        }
+    }
+}
+
+uint8_t get_rx_addr(system_8051_t *sys, uint8_t reg_index) {
+    if(reg_index < 0 || reg_index > 7) {
+        printf("Invalid Rx index\n");
+        return 0x00;
+    }
+
+    uint8_t bank = ((sys->cpu.PSW & PSW_RS1) + (sys->cpu.PSW & PSW_RS0)) >> 3;
+
+    switch (bank) {
+        case 0x00: return 0x00 + reg_index;
+
+
+        case 0x01: return 0x08 + reg_index;
+
+        case 0x02: return 0x10 + reg_index;
+
+        case 0x03: return 0x18 + reg_index;
+
+        default: printf("Invalid bank\n"); return 0x00;
+    }
+
+}
+
 void cpu_step(system_8051_t *sys) {
     // 1. FETCH
     uint8_t opcode = system_read_code(sys, sys->cpu.PC);
@@ -186,6 +279,78 @@ void cpu_step(system_8051_t *sys) {
             if(sys->cpu.A != 0) sys->cpu.PC += offset;
 
             sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xC0: { //PUSH addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->cpu.SP++;
+            uint8_t val = iram_read(sys, target);
+            sys->iram[sys->cpu.SP] = val;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xD0: { //POP addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = sys->iram[sys->cpu.SP];
+            iram_write(sys, target, val);
+            sys->cpu.SP--;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x12: { //LCALL ladd
+            uint16_t highadd = (uint16_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t lowadd = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->cpu.SP++;
+            sys->iram[sys->cpu.SP] = (uint8_t)sys->cpu.PC;
+            sys->cpu.SP++;
+            sys->iram[sys->cpu.SP] = (uint8_t)(sys->cpu.PC >> 8);
+            sys->cpu.PC = (uint16_t)((highadd << 8) + lowadd);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x22: { //RET
+            uint16_t highadd = (uint16_t)sys->iram[sys->cpu.SP];
+            sys->cpu.SP--;
+            uint8_t lowadd = sys->iram[sys->cpu.SP];
+            sys->cpu.SP--;
+            sys->cpu.PC = (uint16_t)((highadd << 8) + lowadd);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV A, Rx
+        case 0xE8: case 0xE9: case 0xEA: case 0xEB: 
+        case 0xEC: case 0xED: case 0xEE: case 0xEF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+
+            sys->cpu.A = sys->iram[rx_addr];
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //MOV Rx, A
+        case 0xF8: case 0xF9: case 0xFA: case 0xFB: 
+        case 0xFC: case 0xFD: case 0xFE: case 0xFF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+
+            sys->iram[rx_addr] = sys->cpu.A;
+            sys->cpu.cycles += 12;
             break;
         }
         

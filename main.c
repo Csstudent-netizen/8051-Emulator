@@ -76,7 +76,7 @@ int main() {
     // Sign flipped purely due to math error. OV should set.
     run_alu_test(&chip, "SUBB Overflow", 0x94, 0x01, 0x80, 0x00); */
 
-    // TEST: LOOP (3 Iterations)
+   /* // TEST: LOOP (3 Iterations)
     printf("\n--- LOOP TEST ---\n");
     system_reset(&chip);
     
@@ -110,7 +110,51 @@ int main() {
     cpu_step(&chip); // DEC (A=0)
     cpu_step(&chip); // JNZ (Should NOT jump now)
     
-    printf("Final: A=%d PC=%04X (Should be 0005)\n", chip.cpu.A, chip.cpu.PC);
+    printf("Final: A=%d PC=%04X (Should be 0005)\n", chip.cpu.A, chip.cpu.PC); */
+
+    // TEST: LCALL and RET
+    printf("\n--- FUNCTION CALL TEST ---\n");
+    system_reset(&chip);
+
+    // 0x0000: LCALL 0x0010 (Opcode 12, High 00, Low 10)
+    chip.irom[0] = 0x12; 
+    chip.irom[1] = 0x00; 
+    chip.irom[2] = 0x10; 
+
+    // 0x0003: MOV A, #55 (Opcode 74, Val 37) - Return Point
+    chip.irom[3] = 0x74;
+    chip.irom[4] = 0x37;
+
+    // 0x0010: MOV A, #99 (Opcode 74, Val 63) - The Subroutine
+    chip.irom[0x10] = 0x74; 
+    chip.irom[0x11] = 0x63;
+
+    // 0x0012: RET (Opcode 22)
+    chip.irom[0x12] = 0x22;
+
+    // Step 1: Execute LCALL
+    // PC should jump to 0010. SP should go from 07 -> 09.
+    cpu_step(&chip);
+    printf("Step 1 (Post-Call): PC=%04X SP=%02X\n", chip.cpu.PC, chip.cpu.SP);
+    
+    // Check Stack content:
+    // SP (09) should hold High Byte (00)
+    // SP-1 (08) should hold Low Byte (03) because next instr was at 0x0003
+    printf("       Stack Top [09]: %02X (Expect 00)\n", chip.iram[chip.cpu.SP]);
+    printf("       Stack - 1 [08]: %02X (Expect 03)\n", chip.iram[chip.cpu.SP-1]);
+
+    // Step 2: Execute Function Body (MOV A, #99)
+    cpu_step(&chip);
+    printf("Step 2 (In Function): A=%d\n", chip.cpu.A);
+
+    // Step 3: Execute RET
+    // PC should go back to 0003. SP should drop back to 07.
+    cpu_step(&chip);
+    printf("Step 3 (Post-RET): PC=%04X SP=%02X\n", chip.cpu.PC, chip.cpu.SP);
+
+    // Step 4: Execute final MOV A, #55
+    cpu_step(&chip);
+    printf("Step 4 (Back Home): A=%d\n", chip.cpu.A);
 
     return 0;
 }
