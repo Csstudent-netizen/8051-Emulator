@@ -112,7 +112,7 @@ int main() {
     
     printf("Final: A=%d PC=%04X (Should be 0005)\n", chip.cpu.A, chip.cpu.PC); */
 
-    // TEST: LCALL and RET
+    /* // TEST: LCALL and RET
     printf("\n--- FUNCTION CALL TEST ---\n");
     system_reset(&chip);
 
@@ -154,7 +154,82 @@ int main() {
 
     // Step 4: Execute final MOV A, #55
     cpu_step(&chip);
-    printf("Step 4 (Back Home): A=%d\n", chip.cpu.A);
+    printf("Step 4 (Back Home): A=%d\n", chip.cpu.A); */
+
+    /* // TEST: Register Bank Switching
+    printf("\n--- REGISTER BANK TEST ---\n");
+    system_reset(&chip);
+
+    // 1. MOV R0, #0x11 (Opcode 78, Val 11) -> Default Bank 0
+    chip.irom[0] = 0x78;
+    chip.irom[1] = 0x11;
+
+    // 2. MOV PSW, #0x08 (Opcode 75, Addr D0, Val 08) -> Switch to Bank 1
+    chip.irom[2] = 0x75;
+    chip.irom[3] = 0xD0; 
+    chip.irom[4] = 0x08; 
+
+    // 3. MOV R0, #0x22 (Opcode 78, Val 22) -> Now in Bank 1
+    chip.irom[5] = 0x78;
+    chip.irom[6] = 0x22;
+
+    // Run 3 instructions
+    cpu_step(&chip); // Step 1
+    cpu_step(&chip); // Step 2 (Switch Bank)
+    cpu_step(&chip); // Step 3
+
+    printf("Bank 0 R0 (Addr 0x00): %02X (Expect 11)\n", chip.iram[0x00]);
+    printf("Bank 1 R0 (Addr 0x08): %02X (Expect 22)\n", chip.iram[0x08]);
+    
+    // Check internal CPU state
+    printf("Final PSW: %02X (Expect 08)\n", chip.cpu.PSW); */
+
+    // TEST: Register Arithmetic & Logic
+    printf("\n--- REGISTER MATH & LOGIC TEST ---\n");
+    system_reset(&chip);
+
+    // 1. INC R0 (Overflow Test)
+    // Initialize R0 = 255 (0xFF). 
+    // Opcode 0x78 (MOV R0, #imm)
+    chip.irom[0] = 0x78; 
+    chip.irom[1] = 0xFF;
+
+    // Execute INC R0. 
+    // Opcode 0x08 (INC R0)
+    // Expectation: R0 becomes 0x00. PSW (Carry) remains 0.
+    chip.irom[2] = 0x08; 
+
+    // 2. XRL A, R1 (Invert Test)
+    // Initialize A = 0x55 (Binary 0101 0101)
+    chip.irom[3] = 0x74; chip.irom[4] = 0x55; 
+
+    // Initialize R1 = 0xFF (Binary 1111 1111)
+    chip.irom[5] = 0x79; chip.irom[6] = 0xFF; 
+
+    // Execute XRL A, R1 (A = A ^ R1)
+    // 0x55 ^ 0xFF should be 0xAA (1010 1010) - Bitwise NOT
+    // Opcode 0x69 (XRL A, R1)
+    chip.irom[7] = 0x69; 
+
+    // --- RUN & VERIFY ---
+
+    // Step 1: MOV R0, #FF
+    cpu_step(&chip); 
+    
+    // Step 2: INC R0
+    cpu_step(&chip);
+    printf("INC R0 (255->0): Val=%02X (Expect 00) | PSW=%02X (Expect 00 - No Carry!)\n", 
+           chip.iram[0x00], chip.cpu.PSW);
+
+    // Step 3: MOV A, #55
+    cpu_step(&chip);
+    
+    // Step 4: MOV R1, #FF
+    cpu_step(&chip);
+
+    // Step 5: XRL A, R1
+    cpu_step(&chip);
+    printf("XRL A, R1: A=%02X (Expect AA)\n", chip.cpu.A);
 
     return 0;
 }

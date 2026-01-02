@@ -17,8 +17,54 @@ static void update_parity(system_8051_t *sys) {
     else sys->cpu.PSW &= ~PSW_P;
 }
 
+static void alu_add(system_8051_t *sys, uint8_t val) {
+    uint8_t old_A = sys->cpu.A;
+    uint16_t result = old_A + val;
+
+    //CY
+    uint8_t c7 = (result > 0xFF);
+    if (c7) sys->cpu.PSW |= PSW_CY;
+    else sys->cpu.PSW &= ~PSW_CY;
+
+    //Overflow calc
+    uint8_t c6 = ((old_A & 0x7F) + (val & 0x7F)) > 0x7F;
+    if (c6 ^ c7) sys->cpu.PSW |= PSW_OV;
+    else sys->cpu.PSW &= ~PSW_OV;
+
+    //AC
+    if ((old_A & 0x0F) + (val & 0x0F) > 0x0F) sys->cpu.PSW |= PSW_AC;
+    else sys->cpu.PSW &= ~PSW_AC;
+
+    sys->cpu.A = (uint8_t)result;
+    update_parity(sys);
+}
+
+static void alu_subb(system_8051_t *sys, uint8_t val) {
+    uint8_t carry = (sys->cpu.PSW & PSW_CY) ? 1 : 0;
+    uint16_t result = sys->cpu.A - val - carry;
+
+    //CY (Borrow)
+    // If result > 255, it means we wrapped around (underflowed)
+    // e.g. 5 - 6 = -1 (0xFFFF in uint16). 0xFFFF > 0xFF.
+    if (result > 0xFF) sys->cpu.PSW |= PSW_CY;
+    else sys->cpu.PSW &= ~PSW_CY;
+
+    //AC (Aux Borrow)
+    if ((sys->cpu.A & 0x0F) < (val & 0x0F) + carry) sys->cpu.PSW |= PSW_AC;
+    else sys->cpu.PSW &= ~PSW_AC;
+
+    //OV
+    uint8_t c7 = (result > 0xFF);
+    uint8_t c6 = ((sys->cpu.A & 0x7F) < ((val & 0x7F) + carry));
+    if (c6 ^ c7) sys->cpu.PSW |= PSW_OV;
+    else sys->cpu.PSW &= ~PSW_OV;
+
+    sys->cpu.A = (uint8_t)result;
+    update_parity(sys);
+}
+
 //handling direct addressing for SFRs
-uint8_t iram_read(system_8051_t *sys, uint8_t address) {
+static uint8_t iram_read(system_8051_t *sys, uint8_t address) {
     if(address < 0x80) return sys->iram[address];
     else {
         switch (address) {
@@ -51,7 +97,7 @@ uint8_t iram_read(system_8051_t *sys, uint8_t address) {
     }
 }
 
-void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
+static void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
     if(address < 0x80) sys->iram[address] = value;
     else {
         switch (address) {
@@ -87,7 +133,7 @@ void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
     }
 }
 
-uint8_t get_rx_addr(system_8051_t *sys, uint8_t reg_index) {
+static uint8_t get_rx_addr(system_8051_t *sys, uint8_t reg_index) {
     if(reg_index < 0 || reg_index > 7) {
         printf("Invalid Rx index\n");
         return 0x00;
@@ -98,7 +144,6 @@ uint8_t get_rx_addr(system_8051_t *sys, uint8_t reg_index) {
     switch (bank) {
         case 0x00: return 0x00 + reg_index;
 
-
         case 0x01: return 0x08 + reg_index;
 
         case 0x02: return 0x10 + reg_index;
@@ -108,6 +153,15 @@ uint8_t get_rx_addr(system_8051_t *sys, uint8_t reg_index) {
         default: printf("Invalid bank\n"); return 0x00;
     }
 
+}
+
+static uint8_t get_indirect_addr(system_8051_t *sys, uint8_t reg_index) {
+    if(reg_index != 0 && reg_index != 1) {
+        printf("Invalid register pointer\n");
+        return 0x00;
+    }
+
+    return sys->iram[get_rx_addr(sys, reg_index)];
 }
 
 void cpu_step(system_8051_t *sys) {
@@ -146,25 +200,7 @@ void cpu_step(system_8051_t *sys) {
             uint8_t val = system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
 
-            uint8_t old_A = sys->cpu.A;
-            uint16_t result = old_A + val;
-
-            //CY
-            uint8_t c7 = (result > 0xFF);
-            if (c7) sys->cpu.PSW |= PSW_CY;
-            else sys->cpu.PSW &= ~PSW_CY;
-
-            //Overflow calc
-            uint8_t c6 = ((old_A & 0x7F) + (val & 0x7F)) > 0x7F;
-            if (c6 ^ c7) sys->cpu.PSW |= PSW_OV;
-            else sys->cpu.PSW &= ~PSW_OV;
-
-            //AC
-            if ((old_A & 0x0F) + (val & 0x0F) > 0x0F) sys->cpu.PSW |= PSW_AC;
-            else sys->cpu.PSW &= ~PSW_AC;
-
-            sys->cpu.A = (uint8_t)result;
-            update_parity(sys);
+            alu_add(sys, val);
             sys->cpu.cycles += 12;
             break;
         }
@@ -173,27 +209,7 @@ void cpu_step(system_8051_t *sys) {
             uint8_t val = system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
 
-            uint8_t carry = (sys->cpu.PSW & PSW_CY) ? 1 : 0;
-            uint16_t result = sys->cpu.A - val - carry;
-
-            //CY (Borrow)
-            // If result > 255, it means we wrapped around (underflowed)
-            // e.g. 5 - 6 = -1 (0xFFFF in uint16). 0xFFFF > 0xFF.
-            if (result > 0xFF) sys->cpu.PSW |= PSW_CY;
-            else sys->cpu.PSW &= ~PSW_CY;
-
-            //AC (Aux Borrow)
-            if ((sys->cpu.A & 0x0F) < (val & 0x0F) + carry) sys->cpu.PSW |= PSW_AC;
-            else sys->cpu.PSW &= ~PSW_AC;
-
-            //OV
-            uint8_t c7 = (result > 0xFF);
-            uint8_t c6 = ((sys->cpu.A & 0x7F) < ((val & 0x7F) + carry));
-            if (c6 ^ c7) sys->cpu.PSW |= PSW_OV;
-            else sys->cpu.PSW &= ~PSW_OV;
-
-            sys->cpu.A = (uint8_t)result;
-            update_parity(sys);
+            alu_subb(sys, val);
             sys->cpu.cycles += 12;
             break;
         }
@@ -350,6 +366,148 @@ void cpu_step(system_8051_t *sys) {
             uint8_t rx_addr = get_rx_addr(sys, reg_index);
 
             sys->iram[rx_addr] = sys->cpu.A;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //MOV Rx, #value
+        case 0x78: case 0x79: case 0x7A: case 0x7B:
+        case 0x7C: case 0x7D: case 0x7E: case 0x7F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->iram[rx_addr] = val;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ADD A, Rx
+        case 0x28: case 0x29: case 0x2A: case 0x2B:
+        case 0x2C: case 0x2D: case 0x2E: case 0x2F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = sys->iram[rx_addr];
+
+            alu_add(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //SUBB A, Rx
+        case 0x98: case 0x99: case 0x9A: case 0x9B:
+        case 0x9C: case 0x9D: case 0x9E: case 0x9F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = sys->iram[rx_addr];
+
+            alu_subb(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //INC Rx
+        case 0x08: case 0x09: case 0x0A: case 0x0B:
+        case 0x0C: case 0x0D: case 0x0E: case 0x0F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+
+            sys->iram[rx_addr]++;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //DEC Rx
+        case 0x18: case 0x19: case 0x1A: case 0x1B:
+        case 0x1C: case 0x1D: case 0x1E: case 0x1F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+
+            sys->iram[rx_addr]--;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ANL A, Rx
+        case 0x58: case 0x59: case 0x5A: case 0x5B:
+        case 0x5C: case 0x5D: case 0x5E: case 0x5F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t addr = get_rx_addr(sys, reg_index);
+            
+            sys->cpu.A &= sys->iram[addr];
+            
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ORL A, Rx
+        case 0x48: case 0x49: case 0x4A: case 0x4B:
+        case 0x4C: case 0x4D: case 0x4E: case 0x4F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t addr = get_rx_addr(sys, reg_index);
+            
+            sys->cpu.A |= sys->iram[addr];
+            
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //XRL A, Rx
+        case 0x68: case 0x69: case 0x6A: case 0x6B:
+        case 0x6C: case 0x6D: case 0x6E: case 0x6F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t addr = get_rx_addr(sys, reg_index);
+            
+            sys->cpu.A ^= sys->iram[addr];
+            
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x75: { //MOV addr, #value
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            iram_write(sys, target, val);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV A, @Rx
+        case 0xE6: case 0xE7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+
+            sys->cpu.A = sys->iram[target];
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //MOV @Rx, A
+        case 0xF6: case 0xF7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+
+            sys->iram[target] = sys->cpu.A;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //MOV @Rx, #value
+        case 0x76: case 0x77: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->iram[target] = val;
             sys->cpu.cycles += 12;
             break;
         }
