@@ -280,7 +280,7 @@ void cpu_step(system_8051_t *sys) {
             break;
         }
 
-        case 0x60: { //JZ, label
+        case 0x60: { //JZ label
             int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
             if(sys->cpu.A == 0) sys->cpu.PC += offset;
@@ -289,11 +289,168 @@ void cpu_step(system_8051_t *sys) {
             break;
         }
 
-        case 0x70: { //JNZ, label
+        case 0x70: { //JNZ label
             int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
             if(sys->cpu.A != 0) sys->cpu.PC += offset;
 
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x80: { //SJMP sadd
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x02: { //LJMP ladd
+            uint16_t highaddr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t lowaddr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->cpu.PC = (uint16_t)((highaddr << 8) + lowaddr);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //DJNZ Rx, label
+        case 0xD8: case 0xD9: case 0xDA: case 0xDB:
+        case 0xDC: case 0xDD: case 0xDE: case 0xDF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->iram[rx_addr]--;
+            if(sys->iram[rx_addr] != 0) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xD5: { //DJNZ addr, label
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val--;
+            iram_write(sys, target, val);
+            if(val != 0) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xB4: { //CJNE A, #value, label
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            if(sys->cpu.A < val) {
+                sys->cpu.PSW |= PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else if(sys->cpu.A > val) {
+                sys->cpu.PSW &= ~PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xB5: { //CJNE A, addr, label
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            if(sys->cpu.A < val) {
+                sys->cpu.PSW |= PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else if(sys->cpu.A > val) {
+                sys->cpu.PSW &= ~PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //CJNE Rx, #value, label
+        case 0xB8: case 0xB9: case 0xBA: case 0xBB:
+        case 0xBC: case 0xBD: case 0xBE: case 0xBF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t rx_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            if(sys->iram[rx_addr] < val) {
+                sys->cpu.PSW |= PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else if(sys->iram[rx_addr] > val) {
+                sys->cpu.PSW &= ~PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //CJNE @Rx, #value, label
+        case 0xB6: case 0xB7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            if(sys->iram[target] < val) {
+                sys->cpu.PSW |= PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else if(sys->iram[target] > val) {
+                sys->cpu.PSW &= ~PSW_CY;
+                sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //AJMP lower8 
+        case 0x01: case 0x21: case 0x41: case 0x61:
+        case 0x81: case 0xA1: case 0xC1: case 0xE1: {
+            uint16_t mid3 = (uint16_t)((opcode & 0xE0) << 3); //3 bits after top 5
+            uint16_t low8 = (uint16_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint16_t high5 = sys->cpu.PC & 0xF800; //top 5 bits
+
+            sys->cpu.PC = high5 + mid3 + low8;
             sys->cpu.cycles += 24;
             break;
         }
@@ -321,27 +478,45 @@ void cpu_step(system_8051_t *sys) {
         }
 
         case 0x12: { //LCALL ladd
-            uint16_t highadd = (uint16_t)system_read_code(sys, sys->cpu.PC);
+            uint16_t highaddr = (uint16_t)system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
-            uint8_t lowadd = system_read_code(sys, sys->cpu.PC);
+            uint8_t lowaddr = system_read_code(sys, sys->cpu.PC);
             sys->cpu.PC++;
 
             sys->cpu.SP++;
             sys->iram[sys->cpu.SP] = (uint8_t)sys->cpu.PC;
             sys->cpu.SP++;
             sys->iram[sys->cpu.SP] = (uint8_t)(sys->cpu.PC >> 8);
-            sys->cpu.PC = (uint16_t)((highadd << 8) + lowadd);
+            sys->cpu.PC = (uint16_t)((highaddr << 8) + lowaddr);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //ACALL lower8
+        case 0x11: case 0x31: case 0x51: case 0x71:
+        case 0x91: case 0xB1: case 0xD1: case 0xF1: {
+            uint16_t mid3 = (uint16_t)((opcode & 0xE0) << 3); //3 bits after top 5
+            uint16_t low8 = (uint16_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint16_t high5 = sys->cpu.PC & 0xF800; //top 5 bits
+
+            sys->cpu.SP++;
+            sys->iram[sys->cpu.SP] = (uint8_t)sys->cpu.PC;
+            sys->cpu.SP++;
+            sys->iram[sys->cpu.SP] = (uint8_t)(sys->cpu.PC >> 8);
+            sys->cpu.PC = high5 + mid3 + low8;
 
             sys->cpu.cycles += 24;
             break;
         }
 
         case 0x22: { //RET
-            uint16_t highadd = (uint16_t)sys->iram[sys->cpu.SP];
+            uint16_t highaddr = (uint16_t)sys->iram[sys->cpu.SP];
             sys->cpu.SP--;
-            uint8_t lowadd = sys->iram[sys->cpu.SP];
+            uint8_t lowaddr = sys->iram[sys->cpu.SP];
             sys->cpu.SP--;
-            sys->cpu.PC = (uint16_t)((highadd << 8) + lowadd);
+            sys->cpu.PC = (uint16_t)((highaddr << 8) + lowaddr);
 
             sys->cpu.cycles += 24;
             break;
@@ -508,6 +683,132 @@ void cpu_step(system_8051_t *sys) {
             sys->cpu.PC++;
 
             sys->iram[target] = val;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ADD A, @Rx
+        case 0x26: case 0x27: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            uint8_t val = sys->iram[target];
+
+            alu_add(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //SUBB A, @Rx
+        case 0x96: case 0x97: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            uint8_t val = sys->iram[target];
+
+            alu_subb(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ANL A, @Rx
+        case 0x56: case 0x57: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            
+            sys->cpu.A &= sys->iram[target];
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ORL A, @Rx
+        case 0x46: case 0x47: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            
+            sys->cpu.A |= sys->iram[target];
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //XRL A, @Rx
+        case 0x66: case 0x67: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            
+            sys->cpu.A ^= sys->iram[target];
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //INC @Rx
+        case 0x06: case 0x07: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+
+            sys->iram[target]++;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //DEC @Rx
+        case 0x16: case 0x17: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+
+            sys->iram[target]--;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //MOV addr, addr
+        case 0x85: {
+            uint8_t src = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t dest = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, src);
+            iram_write(sys, dest, val);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x23: { //RL A
+            uint8_t temp = (sys->cpu.A & 0x80) ? 0x01 : 0x00;
+            sys->cpu.A <<= 1;
+            sys->cpu.A |= temp;
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x03: { //RR A
+            uint8_t temp = (sys->cpu.A & 0x01) ? 0x80 : 0x00;
+            sys->cpu.A >>= 1;
+            sys->cpu.A |= temp;
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xC4: { //SWAP A
+            sys->cpu.A = (sys->cpu.A << 4) + (sys->cpu.A >> 4);
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x33: { //RLC A
+            
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x13: { //RRC A
+            update_parity(sys);
             sys->cpu.cycles += 12;
             break;
         }
