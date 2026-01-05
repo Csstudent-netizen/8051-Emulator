@@ -164,6 +164,41 @@ static uint8_t get_indirect_addr(system_8051_t *sys, uint8_t reg_index) {
     return sys->iram[get_rx_addr(sys, reg_index)];
 }
 
+static uint8_t bit_read(system_8051_t * sys, uint8_t bit_addr) {
+    if(bit_addr < 0x80) { //iram
+        uint8_t byte_addr = 0x20 + (bit_addr >> 3);
+        uint8_t bit_index = bit_addr & 0x07;
+        if(iram_read(sys, byte_addr) & (0x01 << bit_index)) return 0x01;
+        else return 0x00;
+    }
+    //SFRs
+    uint8_t byte_addr = bit_addr & 0xF8;
+    uint8_t bit_index = bit_addr & 0x07;
+    if(iram_read(sys, byte_addr) & (0x01 << bit_index)) return 0x01;
+    else return 0x00;
+}
+
+static void bit_write(system_8051_t *sys, uint8_t bit_addr, uint8_t val) {
+    if(bit_addr < 0x80) { //iram
+        uint8_t byte_addr = 0x20 + (bit_addr >> 3);
+        uint8_t bit_index = bit_addr & 0x07;
+        if(val) sys->iram[byte_addr] |= (0x01 << bit_index);
+        else sys->iram[byte_addr] &= ~(0x01 << bit_index);
+        return;
+    }
+    //SFRs
+    uint8_t byte_addr = bit_addr & 0xF8;
+    uint8_t bit_index = bit_addr & 0x07;
+    if(val) {
+        uint8_t send = iram_read(sys, byte_addr) | (0x01 << bit_index);
+        iram_write(sys, byte_addr, send);
+    }
+    else {
+        uint8_t send = iram_read(sys, byte_addr) & ~(0x01 << bit_index);
+        iram_write(sys, byte_addr, send);
+    }
+}
+
 void cpu_step(system_8051_t *sys) {
     // 1. FETCH
     uint8_t opcode = system_read_code(sys, sys->cpu.PC);
@@ -801,6 +836,11 @@ void cpu_step(system_8051_t *sys) {
         }
 
         case 0x33: { //RLC A
+            uint8_t old_cy = (sys->cpu.PSW & PSW_CY) ? 0x01 : 0x00;
+            uint8_t new_cy = sys->cpu.A & 0x80; 
+            sys->cpu.A <<= 1;
+            sys->cpu.A |= old_cy;
+            sys->cpu.PSW = (new_cy) ? sys->cpu.PSW | PSW_CY : sys->cpu.PSW & ~PSW_CY;
             
             update_parity(sys);
             sys->cpu.cycles += 12;
@@ -808,11 +848,230 @@ void cpu_step(system_8051_t *sys) {
         }
 
         case 0x13: { //RRC A
+            uint8_t old_cy = (sys->cpu.PSW & PSW_CY) ? 0x80 : 0x00;
+            uint8_t new_cy = sys->cpu.A & 0x01; 
+            sys->cpu.A >>= 1;
+            sys->cpu.A |= old_cy;
+            sys->cpu.PSW = (new_cy) ? sys->cpu.PSW | PSW_CY : sys->cpu.PSW & ~PSW_CY;
+
             update_parity(sys);
             sys->cpu.cycles += 12;
             break;
         }
-        
+
+        case 0xC3: { //CLR C
+            sys->cpu.PSW &= ~PSW_CY;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xD3: { //SETB C
+            sys->cpu.PSW |= PSW_CY;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xB3: { //CPL C
+            sys->cpu.PSW ^= PSW_CY;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xC2: { //CLR bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            bit_write(sys, bit_addr, 0x00);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xD2: { //SETB bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            bit_write(sys, bit_addr, 0x01);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xB2: { //CPL bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t val = bit_read(sys, bit_addr);
+            bit_write(sys, bit_addr, !val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xA2: { //MOV C, bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(bit_read(sys, bit_addr)) sys->cpu.PSW |= PSW_CY;
+            else sys->cpu.PSW &= ~PSW_CY;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x92: { //MOV bit_addr, C
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(sys->cpu.PSW & PSW_CY) bit_write(sys, bit_addr, 0x01);
+            else bit_write(sys, bit_addr, 0x00);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x82: { //ANL C, bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(bit_read(sys, bit_addr)) ;
+            else sys->cpu.PSW &= ~PSW_CY;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xB0: { //ANL C, /[bit_addr]
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(!(bit_read(sys, bit_addr))) ;
+            else sys->cpu.PSW &= ~PSW_CY;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x72: { //ORL C, bit_addr
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(bit_read(sys, bit_addr)) sys->cpu.PSW |= PSW_CY;
+            else ;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xA0: { //ORL C, /[bit_addr]
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(!(bit_read(sys, bit_addr))) sys->cpu.PSW |= PSW_CY;
+            else ;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x40: { //JC label 
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(sys->cpu.PSW & PSW_CY) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x50: { //JNC label 
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(!(sys->cpu.PSW & PSW_CY)) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x20: { //JB bit_addr, label 
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(bit_read(sys, bit_addr)) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x30: { //JNB bit_addr, label 
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(!(bit_read(sys, bit_addr))) sys->cpu.PC += offset;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x10: { //JBC bit_addr, label 
+            uint8_t bit_addr = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            int8_t offset = (int8_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            if(bit_read(sys, bit_addr)) {
+                sys->cpu.PC += offset;
+                bit_write(sys, bit_addr, 0x00);
+            }
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x90: { //MOV DPTR, #value16
+            uint16_t high = ((uint16_t)system_read_code(sys, sys->cpu.PC)) << 8;
+            sys->cpu.PC++;
+            uint16_t low = (uint16_t)system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            sys->cpu.DPTR = high + low;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xA3: { //INC DPTR
+            sys->cpu.DPTR++;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x93: { //MOVC A, @A+DPTR
+            uint16_t addr = sys->cpu.DPTR + sys->cpu.A;
+            sys->cpu.A = system_read_code(sys, addr);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x83: { //MOVC A, @A+PC
+            uint16_t addr = sys->cpu.PC + sys->cpu.A;
+            sys->cpu.A = system_read_code(sys, addr);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xE0: { //MOVX A, @DPTR
+            sys->cpu.A = system_read_xram(sys, sys->cpu.DPTR);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xF0: { //MOVX @DPTR, A
+            system_write_xram(sys, sys->cpu.DPTR, sys->cpu.A);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOVX A, @Rx
+        case 0xE2: case 0xE3: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t low = sys->iram[get_rx_addr(sys, reg_index)];
+            uint16_t high = (uint16_t)sys->sfr.P2; // Paging byte
+            uint16_t addr = (high << 8) + low;
+            
+            sys->cpu.A = system_read_xram(sys, addr);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        // MOVX @Rx, A
+        case 0xF2: case 0xF3: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t low = sys->iram[get_rx_addr(sys, reg_index)];
+            uint16_t high = (uint16_t)sys->sfr.P2;
+            uint16_t addr = (high << 8) + low;
+            
+            system_write_xram(sys, addr, sys->cpu.A);
+            sys->cpu.cycles += 24;
+            break;
+        }
+
         default:
             printf("ERROR: Unknown Opcode 0x%02X at Address 0x%04X\n", opcode, sys->cpu.PC - 1);
             break;

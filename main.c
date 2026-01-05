@@ -1,5 +1,6 @@
 // Testbench File
 #include <stdio.h>
+#include <string.h>
 #include "system.h"
 
 
@@ -27,8 +28,17 @@ void run_alu_test(system_8051_t *chip, char* name, uint8_t opcode, uint8_t opera
     printf("\n");
 }
 
+// Helper to print debug info
+void print_state(system_8051_t *sys) {
+    printf("PC: 0x%04X | A: 0x%02X | PSW: 0x%02X | CY: %d\n", 
+           sys->cpu.PC, 
+           sys->cpu.A, 
+           sys->cpu.PSW, 
+           (sys->cpu.PSW >> 7) & 1);
+}
+
 int main() {
-    system_8051_t chip;
+    //system_8051_t chip;
     /*
     printf("=== ALU RAPID FIRE TESTS ===\n\n");
 
@@ -184,7 +194,7 @@ int main() {
     // Check internal CPU state
     printf("Final PSW: %02X (Expect 08)\n", chip.cpu.PSW); */
 
-    // TEST: Register Arithmetic & Logic
+    /* // TEST: Register Arithmetic & Logic
     printf("\n--- REGISTER MATH & LOGIC TEST ---\n");
     system_reset(&chip);
 
@@ -229,7 +239,88 @@ int main() {
 
     // Step 5: XRL A, R1
     cpu_step(&chip);
-    printf("XRL A, R1: A=%02X (Expect AA)\n", chip.cpu.A);
+    printf("XRL A, R1: A=%02X (Expect AA)\n", chip.cpu.A); */
+
+    system_8051_t sys;
+    system_reset(&sys);
+
+    printf("--- 8051 Emulator Test: Boolean Gauntlet ---\n");
+
+    // 2. Load the Test Program into Internal ROM
+    // This program tests SETB, CLR, CPL, JBC, JC, JNB
+    
+    uint8_t program[] = {
+        // INIT: Clear A
+        0x74, 0x00,       // 0x00: MOV A, #0x00
+
+        // TEST 1: SETB C (Carry) and Jump if Carry (JC)
+        0xD3,             // 0x02: SETB C           (C should be 1)
+        0x40, 0x04,       // 0x03: JC +4            (Jump to 0x09)
+        0x74, 0xEE,       // 0x05: MOV A, #0xEE     (FAIL CODE 1)
+        0x80, 0x18,       // 0x07: SJMP to END      (Skip to halt)
+
+        // TEST 2: CLR bit and Jump if Not Bit (JNB)
+        0xC2, 0x00,       // 0x09: CLR 0x00         (Clear Bit 0 of RAM 0x20)
+        0x30, 0x00, 0x04, // 0x0B: JNB 0x00, +4     (Jump to 0x12)
+        0x74, 0xDD,       // 0x0E: MOV A, #0xDD     (FAIL CODE 2)
+        0x80, 0x0F,       // 0x10: SJMP to END
+
+        // TEST 3: CPL bit and Jump if Bit (JB)
+        0xB2, 0x00,       // 0x12: CPL 0x00         (Flip Bit 0 -> becomes 1)
+        0x20, 0x00, 0x04, // 0x14: JB 0x00, +4      (Jump to 0x1B)
+        0x74, 0xCC,       // 0x17: MOV A, #0xCC     (FAIL CODE 3)
+        0x80, 0x06,       // 0x19: SJMP to END
+
+        // TEST 4: JBC (Jump if Bit set, THEN Clear bit)
+        0x10, 0x00, 0x04, // 0x1B: JBC 0x00, +4     (Jump to 0x22 AND clear bit)
+        0x74, 0xBB,       // 0x1E: MOV A, #0xBB     (FAIL CODE 4 - Didn't Jump)
+        0x80, 0x02,       // 0x20: SJMP to END
+
+        // CHECK 4: Ensure Bit was actually cleared by JBC
+        0x30, 0x00, 0x04, // 0x22: JNB 0x00, +4     (Jump to Success)
+        0x74, 0xAA,       // 0x25: MOV A, #0xAA     (FAIL CODE 5 - Bit wasn't cleared)
+        0x80, 0xFE,       // 0x27: SJMP -2 (Halt)
+
+        // SUCCESS
+        0x74, 0xFF,       // 0x29: MOV A, #0xFF     (Success Code)
+        0x80, 0xFE        // 0x2B: SJMP -2 (Infinite Loop / Halt)
+    };
+
+    // Load program into system memory
+    memcpy(sys.irom, program, sizeof(program));
+
+    // 3. Run the CPU
+    // We run for enough cycles to complete the logic (approx 50 steps is plenty)
+    int steps = 0;
+    while (steps < 50) {
+        cpu_step(&sys);
+        steps++;
+
+        // Stop if we hit the infinite loop at the end (Instruction 0x80)
+        // We check if the PC is stuck at the SUCCESS or FAIL trap
+        uint8_t current_opcode = system_read_code(&sys, sys.cpu.PC);
+        if (current_opcode == 0x80) { // SJMP detected
+             // Run one last step to execute the jump and settle the PC
+             cpu_step(&sys);
+             break;
+        }
+    }
+
+    // 4. Validate Results
+    printf("\n--- Test Results ---\n");
+    print_state(&sys);
+
+    if (sys.cpu.A == 0xFF) {
+        printf("\n[SUCCESS] Boolean Logic & Jumps working perfectly!\n");
+    } else {
+        printf("\n[FAILURE] Test failed with Error Code: 0x%02X\n", sys.cpu.A);
+        printf("Error Codes Key:\n");
+        printf("  0xEE: JC failed (Carry Flag logic)\n");
+        printf("  0xDD: JNB or CLR failed\n");
+        printf("  0xCC: JB or CPL failed\n");
+        printf("  0xBB: JBC failed to jump\n");
+        printf("  0xAA: JBC jumped but failed to clear the bit\n");
+    }
 
     return 0;
 }
