@@ -39,6 +39,29 @@ static void alu_add(system_8051_t *sys, uint8_t val) {
     update_parity(sys);
 }
 
+static void alu_addc(system_8051_t *sys, uint8_t val) {
+    uint8_t old_A = sys->cpu.A;
+    uint8_t carryin = (sys->cpu.PSW & PSW_CY) ? 0x01 : 0x00;
+    uint16_t result = old_A + val + carryin;
+
+    //CY
+    uint8_t c7 = (result > 0xFF);
+    if (c7) sys->cpu.PSW |= PSW_CY;
+    else sys->cpu.PSW &= ~PSW_CY;
+
+    //Overflow calc
+    uint8_t c6 = ((old_A & 0x7F) + (val & 0x7F) + carryin) > 0x7F;
+    if (c6 ^ c7) sys->cpu.PSW |= PSW_OV;
+    else sys->cpu.PSW &= ~PSW_OV;
+
+    //AC
+    if ((old_A & 0x0F) + (val & 0x0F) + carryin > 0x0F) sys->cpu.PSW |= PSW_AC;
+    else sys->cpu.PSW &= ~PSW_AC;
+
+    sys->cpu.A = (uint8_t)result;
+    update_parity(sys);
+}
+
 static void alu_subb(system_8051_t *sys, uint8_t val) {
     uint8_t carry = (sys->cpu.PSW & PSW_CY) ? 1 : 0;
     uint16_t result = sys->cpu.A - val - carry;
@@ -69,26 +92,26 @@ static uint8_t iram_read(system_8051_t *sys, uint8_t address) {
     else {
         switch (address) {
             case 0xE0: return sys->cpu.A;
-            
             case 0xF0: return sys->cpu.B;
-
             case 0x81: return sys->cpu.SP;
-
             case 0xD0: return sys->cpu.PSW;
-
             case 0x88: return sys->sfr.TCON;
-            
             case 0x89: return sys->sfr.TMOD;
-            
             case 0x8A: return sys->sfr.TL0;
-
             case 0x8B: return sys->sfr.TL1;
-
             case 0x8C: return sys->sfr.TH0;
-
             case 0x8D: return sys->sfr.TH1;
-
-            //more to come
+            case 0x80: return sys->sfr.P0;
+            case 0x90: return sys->sfr.P1;
+            case 0xA0: return sys->sfr.P2;
+            case 0xB0: return sys->sfr.P3;
+            case 0x82: return (uint8_t)(sys->cpu.DPTR & 0x00FF); // DPL
+            case 0x83: return (uint8_t)(sys->cpu.DPTR >> 8);     // DPH
+            case 0x98: return sys->sfr.SCON;
+            case 0x99: return sys->sfr.SBUF;
+            case 0xA8: return sys->sfr.IE;
+            case 0xB8: return sys->sfr.IP;
+            case 0x87: return sys->sfr.PCON;
             
             default:
                 printf("Unknown SFR address: 0x%02X\n", address);
@@ -107,24 +130,32 @@ static void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
                 break;
             
             case 0xF0: sys->cpu.B = value; break;
-
             case 0x81: sys->cpu.SP = value; break;
-
             case 0xD0: sys->cpu.PSW = value; break;
-
             case 0x88: sys->sfr.TCON = value; break; 
-
             case 0x89: sys->sfr.TMOD = value; break; 
-
             case 0x8A: sys->sfr.TL0 = value; break;
-
             case 0x8B: sys->sfr.TL1 = value; break;
-
             case 0x8C: sys->sfr.TH0 = value; break;
-
             case 0x8D: sys->sfr.TH1 = value; break;
+            case 0x80: sys->sfr.P0 = value; break;
+            case 0x90: sys->sfr.P1 = value; break;
+            case 0xA0: sys->sfr.P2 = value; break;
+            case 0xB0: sys->sfr.P3 = value; break;
 
-            //more to come
+            case 0x82: //DPL
+                sys->cpu.DPTR = (sys->cpu.DPTR & 0xFF00) | value; 
+                break;
+
+            case 0x83: //DPH
+                sys->cpu.DPTR = (sys->cpu.DPTR & 0x00FF) | ((uint16_t)value << 8); 
+                break;
+
+            case 0x98: sys->sfr.SCON = value; break;
+            case 0x99: sys->sfr.SBUF = value; break;
+            case 0xA8: sys->sfr.IE = value; break;
+            case 0xB8: sys->sfr.IP = value; break;
+            case 0x87: sys->sfr.PCON = value; break;
             
             default:
                 printf("Unknown SFR address: 0x%02X\n", address);
@@ -395,9 +426,6 @@ void cpu_step(system_8051_t *sys) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
             }
-            else {
-                sys->cpu.PSW &= ~PSW_CY;
-            }
 
             sys->cpu.cycles += 24;
             break;
@@ -417,9 +445,6 @@ void cpu_step(system_8051_t *sys) {
             else if(sys->cpu.A > val) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
-            }
-            else {
-                sys->cpu.PSW &= ~PSW_CY;
             }
 
             sys->cpu.cycles += 24;
@@ -444,9 +469,6 @@ void cpu_step(system_8051_t *sys) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
             }
-            else {
-                sys->cpu.PSW &= ~PSW_CY;
-            }
 
             sys->cpu.cycles += 24;
             break;
@@ -468,9 +490,6 @@ void cpu_step(system_8051_t *sys) {
             else if(sys->iram[target] > val) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
-            }
-            else {
-                sys->cpu.PSW &= ~PSW_CY;
             }
 
             sys->cpu.cycles += 24;
@@ -1052,7 +1071,7 @@ void cpu_step(system_8051_t *sys) {
         case 0xE2: case 0xE3: {
             uint8_t reg_index = opcode & 0x01;
             uint8_t low = sys->iram[get_rx_addr(sys, reg_index)];
-            uint16_t high = (uint16_t)sys->sfr.P2; // Paging byte
+            uint16_t high = (uint16_t)sys->sfr.P2; //Paging byte
             uint16_t addr = (high << 8) + low;
             
             sys->cpu.A = system_read_xram(sys, addr);
@@ -1064,11 +1083,391 @@ void cpu_step(system_8051_t *sys) {
         case 0xF2: case 0xF3: {
             uint8_t reg_index = opcode & 0x01;
             uint8_t low = sys->iram[get_rx_addr(sys, reg_index)];
-            uint16_t high = (uint16_t)sys->sfr.P2;
+            uint16_t high = (uint16_t)sys->sfr.P2; //Paging byte
             uint16_t addr = (high << 8) + low;
             
             system_write_xram(sys, addr, sys->cpu.A);
             sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x34: { //ADDC A, #value
+            uint8_t val = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            alu_addc(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x35: { //ADDC A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t val = iram_read(sys, target);
+            alu_addc(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ADDC A, @Rx
+        case 0x36: case 0x37: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = get_indirect_addr(sys, reg_index);
+            uint8_t val = sys->iram[target];
+            alu_addc(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //ADDC A, Rx
+        case 0x38: case 0x39: case 0x3A: case 0x3B:
+        case 0x3C: case 0x3D: case 0x3E: case 0x3F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t val = sys->iram[get_rx_addr(sys, reg_index)];
+            alu_addc(sys, val);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x73: { //JMP @A+DPTR
+            sys->cpu.PC = sys->cpu.DPTR + (uint16_t)sys->cpu.A;
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xD4: { //DA A
+            uint16_t result = (uint16_t)sys->cpu.A;
+            if((result & 0x0F) > 0x09 || (sys->cpu.PSW & PSW_AC)) {
+                result += 0x06;
+            }
+            if((result & 0xF0) > 0x90 || (sys->cpu.PSW & PSW_CY)) {
+                result += 0x60;
+                if(result > 0xFF) sys->cpu.PSW |= PSW_CY;
+            }
+
+            sys->cpu.A = (uint8_t)result;
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xE4: { //CLR A
+            sys->cpu.A &= 0x00;
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xF4: { //CPL A
+            sys->cpu.A = ~(sys->cpu.A);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x32: { //RETI
+            uint16_t highaddr = (uint16_t)sys->iram[sys->cpu.SP];
+            sys->cpu.SP--;
+            uint8_t lowaddr = sys->iram[sys->cpu.SP];
+            sys->cpu.SP--;
+            sys->cpu.PC = (uint16_t)((highaddr << 8) + lowaddr);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x25: { //ADD A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t val = iram_read(sys, target);
+            alu_add(sys, val);
+
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x95: { //SUBB A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t val = iram_read(sys, target);
+            alu_subb(sys, val);
+
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x55: { //ANL A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.A &= val;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x45: { //ORL A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.A |= val;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x65: { //XRL A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.A ^= val;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xE5: { //MOV A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.A = val;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0xF5: { //MOV addr, A
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            iram_write(sys, target, sys->cpu.A);
+
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x05: { //INC addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val++;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x15: { //DEC addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val--;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        case 0x52: { //ANL addr, A
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val &= sys->cpu.A;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x42: { //ORL addr, A
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val |= sys->cpu.A;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x62: { //XRL addr, A
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val ^= sys->cpu.A;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+         case 0x53: { //ANL addr, #value
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t value = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val &= value;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x43: { //ORL addr, #value
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t value = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val |= value;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0x63: { //XRL addr, #value
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+            uint8_t value = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            val ^= value;
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV addr, Rx
+        case 0x88: case 0x89: case 0x8A: case 0x8B:
+        case 0x8C: case 0x8D: case 0x8E: case 0x8F: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t reg_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = sys->iram[reg_addr];
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV Rx, addr
+        case 0xA8: case 0xA9: case 0xAA: case 0xAB:
+        case 0xAC: case 0xAD: case 0xAE: case 0xAF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t reg_addr = get_rx_addr(sys, reg_index);
+            uint8_t val = iram_read(sys, target);
+            sys->iram[reg_addr] = val;
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV addr, @Rx
+        case 0x86: case 0x87: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t in_addr = get_indirect_addr(sys, reg_index);
+            uint8_t val = sys->iram[in_addr];
+            iram_write(sys, target, val);
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        //MOV @Rx, addr
+        case 0xA6: case 0xA7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t val = iram_read(sys, target);
+            uint8_t in_addr = get_indirect_addr(sys, reg_index);
+            sys->iram[in_addr] = val;
+
+            sys->cpu.cycles += 24;
+            break;
+        }
+
+        case 0xC5: { //XCH A, addr
+            uint8_t target = system_read_code(sys, sys->cpu.PC);
+            sys->cpu.PC++;
+
+            uint8_t temp = sys->cpu.A;
+            uint8_t val = iram_read(sys, target);
+            sys->cpu.A = val;
+            iram_write(sys, target, temp);
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //XCH A, @Rx
+        case 0xC6: case 0xC7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t in_addr = get_indirect_addr(sys, reg_index);
+
+            uint8_t temp = sys->cpu.A;
+            sys->cpu.A = sys->iram[in_addr];
+            sys->iram[in_addr] = temp;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        } 
+
+        //XCHD A, @Rx
+        case 0xD6: case 0xD7: {
+            uint8_t reg_index = opcode & 0x01;
+            uint8_t in_addr = get_indirect_addr(sys, reg_index);
+
+            uint8_t lower_A = sys->cpu.A & 0x0F;
+            uint8_t addr_n = sys->iram[in_addr] & 0x0F;
+            sys->cpu.A &= 0xF0;
+            sys->cpu.A += addr_n;
+            sys->iram[in_addr] &= 0xF0;
+            sys->iram[in_addr] += lower_A;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
+            break;
+        }
+
+        //XCH A, Rx
+        case 0xC8: case 0xC9: case 0xCA: case 0xCB:
+        case 0xCC: case 0xCD: case 0xCE: case 0xCF: {
+            uint8_t reg_index = opcode & 0x07;
+            uint8_t reg_addr = get_rx_addr(sys, reg_index);
+
+            uint8_t temp = sys->cpu.A;
+            sys->cpu.A = sys->iram[reg_addr];
+            sys->iram[reg_addr] = temp;
+
+            update_parity(sys);
+            sys->cpu.cycles += 12;
             break;
         }
 

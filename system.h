@@ -14,7 +14,7 @@ typedef struct {
     uint8_t EA; //External access  
     
     // Internal RAM
-    uint8_t iram[128];   
+    uint8_t iram[128 + 128]; //to handle indirect addressing (case where Rx contains value greater than 0x7F)
 
     // External RAM
     uint8_t xram[65536]; 
