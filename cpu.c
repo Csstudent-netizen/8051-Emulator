@@ -131,7 +131,12 @@ static void iram_write(system_8051_t *sys, uint8_t address, uint8_t value) {
             
             case 0xF0: sys->cpu.B = value; break;
             case 0x81: sys->cpu.SP = value; break;
-            case 0xD0: sys->cpu.PSW = value; break;
+            
+            case 0xD0: 
+                sys->cpu.PSW = value; 
+                update_parity(sys);
+                break;
+
             case 0x88: sys->sfr.TCON = value; break; 
             case 0x89: sys->sfr.TMOD = value; break; 
             case 0x8A: sys->sfr.TL0 = value; break;
@@ -426,6 +431,9 @@ void cpu_step(system_8051_t *sys) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
             }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
 
             sys->cpu.cycles += 24;
             break;
@@ -445,6 +453,9 @@ void cpu_step(system_8051_t *sys) {
             else if(sys->cpu.A > val) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
             }
 
             sys->cpu.cycles += 24;
@@ -469,6 +480,9 @@ void cpu_step(system_8051_t *sys) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
             }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
+            }
 
             sys->cpu.cycles += 24;
             break;
@@ -490,6 +504,9 @@ void cpu_step(system_8051_t *sys) {
             else if(sys->iram[target] > val) {
                 sys->cpu.PSW &= ~PSW_CY;
                 sys->cpu.PC += offset;
+            }
+            else {
+                sys->cpu.PSW &= ~PSW_CY;
             }
 
             sys->cpu.cycles += 24;
