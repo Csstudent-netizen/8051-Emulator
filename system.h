@@ -38,6 +38,6 @@ void system_write_xram(system_8051_t *sys, uint16_t address, uint8_t value);
 
 void cpu_step(system_8051_t *sys);
 
-void peripherals_step(system_8051_t *sys, uint64_t cycles_count);
+void peripherals_step(system_8051_t *sys, uint64_t step_cycles);
 
 #endif

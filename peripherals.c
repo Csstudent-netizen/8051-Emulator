@@ -1,14 +1,14 @@
 #include "system.h"
 #include <stdio.h>
 
-void peripherals_step(system_8051_t * sys, int step_cycles) {
+void peripherals_step(system_8051_t * sys, uint64_t step_cycles) {
     int ticks = step_cycles / 12;
     if(ticks == 0) ticks = 1;
     uint8_t t0_mode = sys->sfr.TMOD & 0x03;
     uint8_t t1_mode = sys->sfr.TMOD & 0x30;
 
     if(t0_mode == 0x03) {
-        if (sys->sfr.TCON & 0x10) { 
+        if (sys->sfr.TCON & TCON_TR0) { 
              uint16_t val = sys->sfr.TL0 + ticks;
              if (val > 0xFF) {
                  sys->sfr.TCON |= TCON_TF0;
@@ -16,7 +16,7 @@ void peripherals_step(system_8051_t * sys, int step_cycles) {
              }
              sys->sfr.TL0 = (uint8_t)val;
         }
-        if (sys->sfr.TCON & 0x40) {
+        if (sys->sfr.TCON & TCON_TR1) {
              uint16_t val = sys->sfr.TH0 + ticks;
              if (val > 0xFF) {
                  sys->sfr.TCON |= TCON_TF1;
